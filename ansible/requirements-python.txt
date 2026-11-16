@@ -1,0 +1,7 @@
+# Dependencias de Python para el controlador de Ansible (EC2 o runner)
+ansible-core>=2.17
+# paramiko 4+ eliminó el intercambio de llaves con SHA-1 (diffie-hellman-group14-sha1),
+# que es el único que ofrece el SSH de IOS 15.7 (IOL). Sin esto: "no acceptable kex algorithm".
+paramiko<4
+netaddr
+jmespath

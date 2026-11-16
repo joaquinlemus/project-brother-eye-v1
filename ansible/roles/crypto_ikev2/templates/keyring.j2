@@ -1,0 +1,6 @@
+{# Separado del resto: la PSK no se puede comparar contra running-config de forma fiable,
+   así que esta parte solo se aplica si el keyring no existe (ver tasks/main.yml). #}
+crypto ikev2 keyring {{ crypto_names.keyring }}
+ peer ANY
+  address 0.0.0.0 0.0.0.0
+  pre-shared-key {{ ikev2_psk }}

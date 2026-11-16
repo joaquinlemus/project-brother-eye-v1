@@ -1,0 +1,4 @@
+---
+# R1 -> nube 1, R2 -> nube 2. El inventario del portal entrega hub_cloud_id y loopback0.
+site_name: Central
+site_code: CENTRAL

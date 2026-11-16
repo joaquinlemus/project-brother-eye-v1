@@ -1,0 +1,10 @@
+---
+- name: Validar protocolo de enrutamiento
+  ansible.builtin.assert:
+    that: routing_protocol in ['ospf', 'bgp']
+    fail_msg: "routing_protocol debe ser ospf o bgp"
+
+- name: Enrutamiento dinámico ({{ routing_protocol | upper }})
+  cisco.ios.ios_config:
+    src: "{{ routing_protocol }}.j2"
+    match: line

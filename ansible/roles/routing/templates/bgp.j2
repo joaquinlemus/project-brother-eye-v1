@@ -1,0 +1,21 @@
+{# Alternativa (routing_protocol: bgp). iBGP AS 65000; los hubs usan
+   'bgp listen range 192.168.5.0/25' (R1) y '192.168.5.128/25' (R2) y no llevan config por sitio. #}
+router bgp 65000
+ bgp router-id {{ loopback0 }}
+ bgp log-neighbor-changes
+ timers bgp 5 15
+{% for c in dmvpn_clouds %}
+ neighbor {{ c.hub.v4 }} remote-as 65000
+ neighbor {{ c.hub.v4 }} description {{ c.hub.name }}
+ neighbor {{ c.hub.v4 }} update-source {{ c.ifname }}
+{% endfor %}
+ address-family ipv4
+  network {{ loopback0 }} mask 255.255.255.255
+  network {{ lan_v4 | ansible.utils.ipaddr('network') }} mask {{ lan_v4 | ansible.utils.ipaddr('netmask') }}
+{% for c in dmvpn_clouds %}
+  neighbor {{ c.hub.v4 }} activate
+{%   if c.id == 1 %}
+  neighbor {{ c.hub.v4 }} weight 200
+{%   endif %}
+{% endfor %}
+ exit-address-family

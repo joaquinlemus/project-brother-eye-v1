@@ -1,0 +1,15 @@
+{# Loopback0 y LAN dual stack, igual que R3/R4. Gateway = primera IP usable.
+   El 'no shutdown' lo hace la tarea ios_interfaces (IOS no lo muestra en running-config). #}
+interface Loopback0
+ ip address {{ loopback0 }} 255.255.255.255
+!
+{% for i in lan_interfaces %}
+{%   set v4 = lan_v4_list[loop.index0] %}
+{%   set v6 = lan_v6_list[loop.index0] %}
+interface {{ i }}
+ ip address {{ v4 | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address') }} {{ v4 | ansible.utils.ipaddr('netmask') }}
+ ip ospf {{ ospf.process_id }} area {{ ospf.area }}
+ ipv6 address {{ v6 | ansible.utils.ipaddr('1') | upper }}
+ ospfv3 {{ ospf.process_id }} ipv6 area {{ ospf.area }}
+!
+{% endfor %}

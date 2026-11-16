@@ -1,0 +1,4 @@
+---
+# Inventario dinámico: el plugin consulta GET /api/v1/inventory/ansible.
+# El runner recibe PORTAL_API_URL, PORTAL_RUNNER_TOKEN y PORTAL_SITE_CODE como variables de entorno.
+plugin: portal_inventory

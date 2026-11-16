@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write        # OIDC hacia AWS (terraform plan)
+  pull-requests: write   # comentar el plan
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.f.outputs.backend }}
+      frontend: ${{ steps.f.outputs.frontend }}
+      ansible: ${{ steps.f.outputs.ansible }}
+      infra: ${{ steps.f.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: f
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:  ['backend/**', 'database/**']
+            frontend: ['frontend/**']
+            ansible:  ['ansible/**']
+            infra:    ['infrastructure/**']
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: test }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[dev]" pip-audit
+      - run: ruff check app tests
+      - name: Pruebas (dominio + API + worker contra PostgreSQL, run-job.sh simulado)
+        run: pytest -q
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/portal_test
+      - run: pip-audit
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build          # export estático en frontend/out
+      - run: npm audit --audit-level=high
+
+  ansible:
+    needs: changes
+    if: needs.changes.outputs.ansible == 'true'
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: ansible } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install ansible-lint yamllint netaddr
+      - run: ansible-galaxy collection install -r requirements.yml
+      - run: yamllint -d relaxed playbooks roles inventories
+      - run: ansible-lint playbooks/ roles/      # perfil production (.ansible-lint)
+      - name: Sintaxis de playbooks
+        run: for p in playbooks/*.yml; do ansible-playbook -i tests/render_inventory.yml --syntax-check "$p"; done
+      - name: Render de plantillas y comparación con golden
+        run: |
+          ANSIBLE_CALLBACKS_ENABLED= ansible-playbook -i tests/render_inventory.yml tests/render.yml
+          diff -ru tests/golden tests/out
+      - name: Plantillas reproducen la configuración probada de R1, R2 y R3
+        run: cd tests && python3 compare_reference.py out
+
+  terraform:
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: infrastructure/terraform/envs/lab } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive ../..
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+      - run: terraform init -input=false
+      - run: terraform validate
+      - uses: bridgecrewio/checkov-action@v12
+        with: { directory: infrastructure/terraform, soft_fail: true }
+      - run: terraform plan -input=false -no-color -out=tfplan

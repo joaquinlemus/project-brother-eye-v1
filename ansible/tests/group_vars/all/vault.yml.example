@@ -1,0 +1,14 @@
+---
+# Copiar como vault.yml, completar y cifrar:
+#   cp vault.yml.example vault.yml && ansible-vault encrypt vault.yml
+# vault.yml está en .gitignore: nunca se sube sin cifrar.
+vault_secrets:
+  admin_user: ansible
+  admin_password: cisco123
+  enable_secret: cisco123          # no se usa con privilegio 15, pero Ansible lo pide definido
+  ikev2_psk: "<PSK de los hubs>"
+  nhrp_auth: ""                    # no se usa (nhrp_auth_enabled: false)
+  snmp_user: zbxuser
+  snmp_auth: "<clave SNMPv3 auth, mínimo 8 caracteres>"
+  snmp_priv: "<clave SNMPv3 priv, mínimo 8 caracteres>"
+  zabbix_api_token: "<token de API de Zabbix>"

@@ -1,0 +1,20 @@
+---
+# Spoke nuevo R5 (Site ID 5). Valores según las reglas del IPAM.
+# Uso: cp inventories/examples/site_R5.yml inventories/
+all:
+  children:
+    spokes:
+      hosts:
+        R5:
+          ansible_host: 172.16.0.5
+          site_id: 5
+          site_code: SPOKE-R5
+          site_name: SPOKE-R5
+          loopback0: 10.254.0.5
+          lan_interfaces: [Ethernet0/1]
+          lan_v4: 10.33.0.0/24
+          lan_v6: "2001:1228:5::/64"
+          tunnel1_v4: 192.168.5.5
+          tunnel2_v4: 192.168.5.135
+          tunnel1_v6: "fd00:5::5"
+          tunnel2_v6: "fd00:5:1::5"

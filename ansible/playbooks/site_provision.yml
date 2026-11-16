@@ -1,0 +1,104 @@
+---
+# Alta de sucursal. El runner lo ejecuta con: --limit <hostname> y PORTAL_SITE_CODE=<código>
+- name: Day-0 (solo si el router aún no responde por SSH)
+  hosts: spokes
+  gather_facts: false
+  tasks:
+    - name: Probar SSH en la IP underlay
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 22
+        timeout: 5
+      delegate_to: localhost
+      register: _ssh_probe
+      ignore_errors: true
+
+    - name: Bootstrap por consola
+      ansible.builtin.include_role:
+        name: day0_bootstrap
+      when: _ssh_probe is failed
+
+- name: Configurar spoke
+  hosts: spokes
+  gather_facts: false
+  tasks:
+    - name: Aplicar roles en orden de dependencia
+      block:
+        - name: "Front-door VRF"
+          ansible.builtin.include_role:
+            name: fvrf
+            apply: { tags: [base] }
+          tags: [base]
+
+        - name: "Configuración base"
+          ansible.builtin.include_role:
+            name: base
+            apply: { tags: [base] }
+          tags: [base]
+
+        - name: "IPsec IKEv2"
+          ansible.builtin.include_role:
+            name: crypto_ikev2
+            apply: { tags: [crypto] }
+          tags: [crypto]
+
+        - name: "Loopback y LAN"
+          ansible.builtin.include_role:
+            name: lan
+            apply: { tags: [lan] }
+          tags: [lan]
+
+        - name: "Túneles DMVPN"
+          ansible.builtin.include_role:
+            name: dmvpn_spoke
+            apply: { tags: [dmvpn] }
+          tags: [dmvpn]
+
+        - name: "Enrutamiento"
+          ansible.builtin.include_role:
+            name: routing
+            apply: { tags: [routing] }
+          tags: [routing]
+
+        - name: "SNMPv3"
+          ansible.builtin.include_role:
+            name: snmpv3
+            apply: { tags: [snmp] }
+          tags: [snmp]
+
+        - name: Guardar configuración si hubo cambios
+          cisco.ios.ios_config:
+            save_when: modified
+          tags: [always]
+
+        - name: Verificación (pruebas de aceptación 1-3)
+          ansible.builtin.include_role:
+            name: verify
+            apply: { tags: [verify] }
+          tags: [verify]
+
+        - name: Registro en Zabbix
+          ansible.builtin.include_role:
+            name: zabbix_host
+            apply: { tags: [zabbix] }
+          tags: [zabbix]
+      rescue:
+        - name: Recolectar diagnóstico para el portal
+          cisco.ios.ios_command:
+            commands:
+              - show dmvpn
+              - show crypto ikev2 sa
+              - show ip ospf neighbor
+              - show ip interface brief
+          register: _diag
+          ignore_errors: true
+
+        - name: Publicar diagnóstico
+          ansible.builtin.set_stats:
+            data:
+              diagnostics: "{{ _diag.stdout | default([]) }}"
+              failed_task: "{{ ansible_failed_task.name | default('desconocida') }}"
+
+        - name: "Fallar el job (sin rollback automático: el portal decide reintentar o dar de baja)"
+          ansible.builtin.fail:
+            msg: "Aprovisionamiento falló en '{{ ansible_failed_task.name | default('?') }}'"

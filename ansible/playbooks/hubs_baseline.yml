@@ -1,0 +1,15 @@
+---
+# Una sola vez al inicio del proyecto (y para cambios globales). Nunca por cada sitio.
+- name: Línea base de hubs
+  hosts: hubs
+  gather_facts: false
+  serial: 1                      # un hub a la vez: nunca dejar el overlay sin hubs
+  roles:
+    - hub_baseline
+  post_tasks:
+    - name: Guardar configuración
+      cisco.ios.ios_config:
+        save_when: modified
+    - name: Registrar hub en Zabbix
+      ansible.builtin.include_role:
+        name: zabbix_host

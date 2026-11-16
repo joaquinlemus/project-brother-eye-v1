@@ -1,0 +1,6 @@
+# Ajustar con los usuarios de GitHub del equipo
+/ansible/                 @equipo-redes
+/infrastructure/          @equipo-cloud
+/database/                @equipo-backend
+/backend/                 @equipo-backend
+/frontend/                @equipo-frontend

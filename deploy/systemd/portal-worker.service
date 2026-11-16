@@ -1,0 +1,22 @@
+[Unit]
+Description=Portal Heladería Leche de Cabra - worker de Ansible
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=__USER__
+Group=__USER__
+EnvironmentFile=/opt/xyz/portal/portal.env
+Environment=HOME=__HOME__
+WorkingDirectory=/opt/xyz/portal/backend
+ExecStart=/opt/xyz/portal/venv/bin/python -m app.worker
+Restart=on-failure
+RestartSec=5
+# Un job en curso termina como fallido si se detiene el servicio; se puede reintentar.
+TimeoutStopSec=30
+KillMode=mixed
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

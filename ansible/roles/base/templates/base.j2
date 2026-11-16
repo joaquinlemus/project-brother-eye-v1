@@ -1,0 +1,39 @@
+{# Rol base: identidad, AAA local, NTP, syslog, SSH. Todo lo de gestión sale por la FVRF. #}
+hostname {{ inventory_hostname }}
+ip domain name {{ domain_name }}
+no ip domain lookup
+ipv6 unicast-routing
+service timestamps log datetime msec localtime show-timezone
+service password-encryption
+clock timezone {{ timezone.name }} {{ timezone.offset }} 0
+!
+aaa new-model
+aaa authentication login default local
+aaa authorization exec default local
+!
+login block-for 120 attempts 5 within 60
+login on-failure log
+login on-success log
+!
+ip ssh version 2
+ip ssh time-out 60
+ip ssh authentication-retries 3
+!
+ip access-list standard MGMT
+{% for ip in [mgmt_servers.jump_host, mgmt_servers.zabbix] | unique %}
+ permit {{ ip }}
+{% endfor %}
+ deny   any log
+!
+line vty 0 4
+ access-class MGMT in vrf-also
+ transport input ssh
+ exec-timeout 15 0
+!
+ntp server vrf {{ fvrf_name }} {{ mgmt_servers.ntp }}
+!
+logging buffered 64000 informational
+logging source-interface {{ wan_interface }} vrf {{ fvrf_name }}
+logging host {{ mgmt_servers.syslog }} vrf {{ fvrf_name }}
+logging trap informational
+!

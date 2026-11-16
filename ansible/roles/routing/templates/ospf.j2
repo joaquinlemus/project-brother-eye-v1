@@ -1,0 +1,38 @@
+{# OSPFv2 + OSPFv3 igual que R3/R4 probados: red broadcast, prioridad 0 en el spoke
+   (el hub es el DR), timers 5/15, costo 10 hacia R1 y 100 hacia R2. La LAN se anuncia
+   pero es pasiva. Los hubs no necesitan nada por sitio. #}
+ipv6 unicast-routing
+!
+router ospfv3 {{ ospf.process_id }}
+ router-id {{ loopback0 }}
+ !
+ address-family ipv6 unicast
+{% for i in lan_interfaces %}
+  passive-interface {{ i }}
+{% endfor %}
+ exit-address-family
+!
+router ospf {{ ospf.process_id }}
+ router-id {{ loopback0 }}
+{% for i in lan_interfaces %}
+ passive-interface {{ i }}
+{% endfor %}
+!
+{% for c in dmvpn_clouds %}
+interface {{ c.ifname }}
+ ip ospf network {{ ospf.network_type }}
+ ip ospf dead-interval {{ ospf.dead }}
+ ip ospf hello-interval {{ ospf.hello }}
+ ip ospf priority {{ ospf.spoke_priority }}
+ ip ospf {{ ospf.process_id }} area {{ ospf.area }}
+ ip ospf cost {{ c.ospf_cost }}
+ ospfv3 network {{ ospf.network_type }}
+ ospfv3 hello-interval {{ ospf.hello }}
+ ospfv3 dead-interval {{ ospf.dead }}
+ ospfv3 priority {{ ospf.spoke_priority }}
+ ospfv3 cost {{ c.ospf_cost }}
+ ospfv3 {{ ospf.process_id }} ipv6 area {{ ospf.area }}
+!
+{% endfor %}
+interface Loopback0
+ ip ospf {{ ospf.process_id }} area {{ ospf.area }}

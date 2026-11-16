@@ -1,0 +1,30 @@
+{# Túneles del spoke, igual que R3/R4 probados: Tunnel0 -> R1, Tunnel1 -> R2.
+   Las líneas OSPF de estas interfaces las agrega el rol routing.
+   IPv6 en mayúsculas porque IOS las muestra así (si no, ios_config vería diferencias). #}
+{% for c in dmvpn_clouds %}
+{%   set t_v4 = hostvars[inventory_hostname]['tunnel' ~ c.id ~ '_v4'] %}
+{%   set t_v6 = hostvars[inventory_hostname]['tunnel' ~ c.id ~ '_v6'] | upper %}
+interface {{ c.ifname }}
+ ip address {{ t_v4 }} {{ c.v4_mask }}
+ no ip redirects
+ ip mtu {{ tunnel_mtu }}
+{%   if nhrp_auth_enabled %}
+ ip nhrp authentication {{ nhrp_auth }}
+{%   endif %}
+ ip nhrp network-id {{ c.nhrp_network_id }}
+ ip nhrp nhs {{ c.hub.v4 }} nbma {{ c.hub.nbma }} multicast
+ ip tcp adjust-mss {{ tunnel_mss_v4 }}
+ ipv6 address FE80::{{ site_id }} link-local
+ ipv6 address {{ t_v6 }}/64
+{%   if nhrp_auth_enabled %}
+ ipv6 nhrp authentication {{ nhrp_auth }}
+{%   endif %}
+ ipv6 nhrp network-id {{ c.nhrp_network_id }}
+ ipv6 nhrp nhs {{ c.hub.v6 }} nbma {{ c.hub.nbma }} multicast
+ tunnel source {{ wan_interface }}
+ tunnel mode gre multipoint
+ tunnel key {{ c.key }}
+ tunnel vrf {{ fvrf_name }}
+ tunnel protection ipsec profile {{ crypto_names.ipsec_profile }} shared
+!
+{% endfor %}

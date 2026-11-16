@@ -1,0 +1,6 @@
+---
+- name: Túneles DMVPN hacia Hub 1 y Hub 2 (dual cloud)
+  cisco.ios.ios_config:
+    src: tunnels.j2
+    match: line
+  no_log: "{{ not (debug_secrets | default(false)) }}"   # contiene la clave NHRP

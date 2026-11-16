@@ -1,0 +1,17 @@
+---
+- name: Loopback0 y LAN dual stack
+  cisco.ios.ios_config:
+    src: lan.j2
+    match: line
+  vars:
+    lan_v4_list: "{{ [lan_v4] if lan_v4 is string else lan_v4 }}"
+    lan_v6_list: "{{ [lan_v6] if lan_v6 is string else lan_v6 }}"
+
+# 'no shutdown' no aparece en running-config: con ios_config daría changed en cada corrida.
+- name: Encender interfaces LAN (idempotente)
+  cisco.ios.ios_interfaces:
+    config:
+      - name: "{{ item }}"
+        enabled: true
+    state: merged
+  loop: "{{ lan_interfaces }}"

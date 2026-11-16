@@ -1,0 +1,113 @@
+---
+# Baja de un spoke. Orden pensado para que los hubs pierdan al sitio rápido y limpio:
+# 1) apagar túneles  2) quitar routing/DMVPN/IPsec/SNMP/LAN  3) limpiar NHRP y SA en hubs.
+# Se conserva FVRF + usuario + SSH para poder auditar o reutilizar el equipo.
+- name: Respaldar running-config antes de la baja
+  cisco.ios.ios_config:
+    backup: true
+    backup_options:
+      dir_path: "{{ artifacts_dir | default('/tmp/artifacts') }}/backups"
+      filename: "{{ inventory_hostname }}-pre-decommission.cfg"
+
+- name: Apagar túneles DMVPN
+  cisco.ios.ios_config:
+    lines: [shutdown]
+    parents: "interface {{ item.ifname }}"
+  loop: "{{ dmvpn_clouds }}"
+  loop_control: { label: "{{ item.ifname }}" }
+
+- name: Leer configuración vigente para quitar solo lo que existe (idempotente)
+  cisco.ios.ios_command:
+    commands:
+      - show running-config | include ^interface Tunnel|^router ospf|^router ospfv3|^router bgp|^crypto|^snmp-server|^interface Loopback0|^ip access-list standard ACL-SNMP
+  register: _cur
+  changed_when: false
+
+# Aparte, porque en un router sin SNMP (por ejemplo, un alta que falló antes de ese paso) IOS
+# responde "%SNMP agent not enabled" y ios_command lo trata como error. Eso significa
+# simplemente que no hay usuarios SNMP que quitar.
+- name: Leer usuarios SNMPv3 (puede no haber agente SNMP)
+  cisco.ios.ios_command:
+    commands: [show snmp user]
+  register: _snmp_users
+  changed_when: false
+  failed_when: false
+
+- name: Eliminar enrutamiento, túneles, IPsec y Loopback0
+  cisco.ios.ios_config:
+    lines: "{{ _remove | only_present(_cur.stdout[0]) }}"
+  when: (_remove | only_present(_cur.stdout[0])) | length > 0
+  vars:
+    _remove:
+      - "no interface {{ dmvpn_clouds[0].ifname }}"
+      - "no interface {{ dmvpn_clouds[1].ifname }}"
+      - "no router ospf {{ ospf.process_id }}"
+      - "no router ospfv3 {{ ospf.process_id }}"
+      - "no router bgp 65000"
+      - "no crypto ipsec profile {{ crypto_names.ipsec_profile }}"
+      - "no crypto ipsec transform-set {{ crypto_names.transform_set }}"
+      - "no crypto ikev2 profile {{ crypto_names.ikev2_profile }}"
+      - "no crypto ikev2 keyring {{ crypto_names.keyring }}"
+      - "no crypto ikev2 policy {{ crypto_names.policy }}"
+      - "no crypto ikev2 proposal {{ crypto_names.proposal }}"
+      - "no crypto ikev2 dpd {{ ikev2.dpd.interval }} {{ ikev2.dpd.retries }} periodic"
+      - "no interface Loopback0"
+
+# IOS crea por su cuenta 'snmp-server group <usuario> v3 priv' al definir el host de traps,
+# por eso se elimina explícitamente. Solo se niega lo que existe (filtro only_present).
+- name: Eliminar SNMPv3 (usuario, traps, grupos, vista, ACL y parámetros)
+  cisco.ios.ios_config:
+    lines: "{{ (_snmp_remove | only_present(_cur.stdout[0])) + _snmp_user_remove }}"
+  when: ((_snmp_remove | only_present(_cur.stdout[0])) + _snmp_user_remove) | length > 0
+  vars:
+    _snmp_user_remove: "{{ ['no snmp-server user ' ~ snmp_user ~ ' ' ~ snmp.group ~ ' v3']
+                           if ('User name: ' ~ snmp_user) in (_snmp_users.stdout | default([''], true) | first) else [] }}"
+    _snmp_remove:
+      - "no snmp-server host {{ mgmt_servers.zabbix }} vrf {{ fvrf_name }} version 3 priv {{ snmp_user }}"
+      - "no snmp-server group {{ snmp.group }} v3 priv"
+      - "no snmp-server group {{ snmp_user }} v3 priv"
+      - "no snmp-server view {{ snmp.view }} iso"
+      - "no snmp-server location"
+      - "no snmp-server contact"
+      - "no snmp-server trap-source"
+      - "no snmp-server ifindex persist"
+      - "no snmp-server enable traps"
+      - "no ip access-list standard ACL-SNMP"
+
+- name: Dejar la LAN en configuración de fábrica
+  cisco.ios.ios_config:
+    lines: ["default interface {{ lan_interfaces[0] }}"]
+  changed_when: false     # 'default interface' no es comparable contra running-config
+
+- name: Apagar la LAN
+  cisco.ios.ios_interfaces:
+    config:
+      - name: "{{ lan_interfaces[0] }}"
+        enabled: false
+    state: merged
+
+# La sesión IPsec del spoke en los hubs no se borra a mano: con los túneles ya apagados,
+# el DPD (crypto ikev2 dpd 10 3 periodic) la cierra solo en ~30 s. Además,
+# 'clear crypto session remote <ip> fvrf <vrf>' no existe con esa forma en IOS 15.7.
+- name: Limpiar NHRP IPv4 del sitio en los hubs (comando operativo)
+  cisco.ios.ios_command:
+    commands:
+      - "clear ip nhrp {{ hostvars[inventory_hostname]['tunnel' ~ hub_item.id ~ '_v4'] }}"
+  delegate_to: "{{ hub_item.hub.name }}"
+  loop: "{{ dmvpn_clouds }}"
+  loop_control: { loop_var: hub_item, label: "{{ hub_item.hub.name }}" }
+
+# IOS 15.7 exige prefijo con máscara: 'clear ipv6 nhrp FD00:5::6/128' (verificado en R1).
+# Si fallara, la entrada caduca sola por holdtime, así que no detiene la baja.
+- name: Limpiar NHRP IPv6 del sitio en los hubs
+  cisco.ios.ios_command:
+    commands:
+      - "clear ipv6 nhrp {{ hostvars[inventory_hostname]['tunnel' ~ hub_item.id ~ '_v6'] | upper }}/128"
+  delegate_to: "{{ hub_item.hub.name }}"
+  loop: "{{ dmvpn_clouds }}"
+  loop_control: { loop_var: hub_item, label: "{{ hub_item.hub.name }}" }
+  failed_when: false
+
+- name: Guardar configuración
+  cisco.ios.ios_config:
+    save_when: modified

@@ -1,0 +1,22 @@
+flowchart LR
+  U((Usuarios<br/>Internet)) -->|HTTPS| WEB
+  subgraph EC2["EC2 en AWS — IP elástica 184.195.236.235"]
+    direction TB
+    WEB[Portal web<br/>Caddy + Next.js + FastAPI]
+    DB[(PostgreSQL<br/>inventario, IPAM, auditoría)]
+    ANS[Worker + Ansible]
+    WG[WireGuard<br/>wg0 10.99.0.1]
+    WEB --> DB
+    DB --> ANS
+    ANS --> WG
+  end
+  subgraph LAB["Laboratorio EVE-NG"]
+    direction TB
+    LNX[Linux 172.16.0.20<br/>WireGuard 10.99.0.2 + NAT<br/>Zabbix + NTP]
+    NET((Underlay<br/>172.16.0.0/24))
+    R1[R1 hub] --- NET
+    R2[R2 hub] --- NET
+    SP[Spokes R3..Rn] --- NET
+    LNX --- NET
+  end
+  WG <-->|túnel WireGuard<br/>UDP 51820| LNX

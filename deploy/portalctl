@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Administración del portal desde la EC2:  sudo portalctl <comando> [opciones]
+#   portalctl create-user --username admin --email admin@heladeria.local --name "Administrador" --role admin
+#   portalctl import-site --site-id 3 --code MAZ-03 --name "Mazate" --protected
+#   portalctl reset-mfa --username admin
+#   portalctl migrate
+set -euo pipefail
+P=/opt/xyz/portal
+U=$(stat -c %U "$P/portal.env")
+exec sudo -u "$U" bash -c 'set -a; source '"$P"'/portal.env; set +a; cd '"$P"'/backend && exec '"$P"'/venv/bin/python -m app.cli "$@"' portalctl "$@"

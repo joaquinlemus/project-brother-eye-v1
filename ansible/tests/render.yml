@@ -1,0 +1,50 @@
+---
+# Renderiza todas las plantillas a tests/out/<host>/ para revisión y golden tests en CI.
+- name: Render de plantillas
+  hosts: all
+  gather_facts: false
+  connection: local
+  vars:
+    ansible_become: false
+    _sm:                          # reemplaza al secreto real de AWS en las pruebas
+      admin_user: netadmin
+      admin_password: x
+      enable_secret: x
+      ikev2_psk: PSK-DE-PRUEBA
+      nhrp_auth: NHRPKEY
+      snmp_user: zbxuser
+      snmp_auth: x
+      snmp_priv: x
+      zabbix_api_token: x
+    out: "{{ playbook_dir }}/out/{{ inventory_hostname }}"
+  tasks:
+    - ansible.builtin.file: { path: "{{ out }}", state: directory }
+      delegate_to: localhost
+    - name: Spokes
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/{{ item.role }}/templates/{{ item.t }}"
+        dest: "{{ out }}/{{ item.t | regex_replace('.j2$', '.cfg') }}"
+      vars:
+        lan_v4_list: "{{ [lan_v4] if lan_v4 is string else lan_v4 }}"
+        lan_v6_list: "{{ [lan_v6] if lan_v6 is string else lan_v6 }}"
+      loop:
+        - { role: day0_bootstrap, t: day0.j2 }
+        - { role: base, t: base.j2 }
+        - { role: crypto_ikev2, t: ikev2.j2 }
+        - { role: crypto_ikev2, t: keyring.j2 }
+        - { role: lan, t: lan.j2 }
+        - { role: dmvpn_spoke, t: tunnels.j2 }
+        - { role: routing, t: ospf.j2 }
+        - { role: routing, t: bgp.j2 }
+        - { role: snmpv3, t: snmpv3.j2 }
+      when: "'spokes' in group_names"
+      delegate_to: localhost
+    - name: Hubs
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/{{ item.role }}/templates/{{ item.t }}"
+        dest: "{{ out }}/{{ item.t | regex_replace('.j2$', '.cfg') }}"
+      loop:
+        - { role: day0_bootstrap, t: day0.j2 }
+        - { role: hub_baseline, t: hub_tunnel.j2 }
+      when: "'hubs' in group_names"
+      delegate_to: localhost

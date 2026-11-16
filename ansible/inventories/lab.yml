@@ -1,0 +1,13 @@
+---
+# Inventario fijo: solo los hubs, que ya existen y no cambian.
+# Cada spoke llega en su propio archivo inventories/site_<HOST>.yml, que escribe el portal
+# (por ahora, a mano). Ese archivo DEBE estar en esta misma carpeta para que apliquen
+# los group_vars de inventories/group_vars/.
+all:
+  children:
+    hubs:
+      hosts:
+        R1: { ansible_host: 172.16.0.1, loopback0: 10.254.0.1, hub_cloud_id: 1 }
+        R2: { ansible_host: 172.16.0.2, loopback0: 10.254.0.2, hub_cloud_id: 2 }
+    spokes:
+      hosts: {}

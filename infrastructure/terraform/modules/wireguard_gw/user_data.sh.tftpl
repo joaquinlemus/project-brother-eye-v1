@@ -1,0 +1,23 @@
+#!/bin/bash
+# Gateway NAT + WireGuard. La llave privada se lee de SSM; la pública del lab se configura
+# después vía SSM Run Command (no viaja en user_data).
+set -euo pipefail
+dnf install -y wireguard-tools iptables-nft awscli
+sysctl -w net.ipv4.ip_forward=1
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-forward.conf
+
+IFACE=$(ip route show default | awk '{print $5}')
+iptables -t nat -A POSTROUTING -s ${vpc_cidr} -o "$IFACE" -j MASQUERADE
+
+PRIV=$(aws ssm get-parameter --with-decryption --name "${wg_key_param}" --query Parameter.Value --output text)
+cat > /etc/wireguard/wg0.conf <<EOF
+[Interface]
+Address = 192.168.250.1/30
+ListenPort = 51820
+PrivateKey = $PRIV
+# [Peer] del lab: se agrega con SSM Run Command
+#   PublicKey = <llave pública del Linux del lab>
+#   AllowedIPs = 192.168.250.2/32, ${lab_cidr}
+EOF
+chmod 600 /etc/wireguard/wg0.conf
+systemctl enable --now wg-quick@wg0

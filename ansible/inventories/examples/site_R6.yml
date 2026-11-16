@@ -1,0 +1,20 @@
+---
+# Spoke nuevo R6 (Site ID 6). Valores según las reglas del IPAM.
+# Uso: cp inventories/examples/site_R6.yml inventories/
+all:
+  children:
+    spokes:
+      hosts:
+        R6:
+          ansible_host: 172.16.0.6
+          site_id: 6
+          site_code: SPOKE-R6
+          site_name: SPOKE-R6
+          loopback0: 10.254.0.6
+          lan_interfaces: [Ethernet0/1]
+          lan_v4: 10.34.0.0/24
+          lan_v6: "2001:1228:6::/64"
+          tunnel1_v4: 192.168.5.6
+          tunnel2_v4: 192.168.5.136
+          tunnel1_v6: "fd00:5::6"
+          tunnel2_v6: "fd00:5:1::6"

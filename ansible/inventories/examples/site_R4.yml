@@ -1,0 +1,20 @@
+---
+# R4 se configuró a mano: este archivo SOLO sirve para registrarlo en Zabbix
+# (playbooks/zabbix_register.yml). Nunca ejecutes provision/decommission sobre R4.
+all:
+  children:
+    spokes:
+      hosts:
+        R4:
+          ansible_host: 172.16.0.4
+          site_id: 4
+          site_code: SPOKE-R4
+          site_name: SPOKE-R4
+          loopback0: 10.254.0.4
+          lan_interfaces: [Ethernet0/1]
+          lan_v4: 10.32.0.0/24
+          lan_v6: "2001:1228:4::/64"
+          tunnel1_v4: 192.168.5.4
+          tunnel2_v4: 192.168.5.134
+          tunnel1_v6: "fd00:5::4"
+          tunnel2_v6: "fd00:5:1::4"

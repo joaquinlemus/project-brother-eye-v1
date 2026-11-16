@@ -1,0 +1,18 @@
+{# SNMPv3 authPriv. Zabbix vive en el underlay (VRF INET): consulta la IP de e0/0
+   y los traps salen por la FVRF. El usuario SNMPv3 NO aparece en running-config,
+   por eso se configura aparte (snmp_user.j2) solo si 'show snmp user' no lo lista. #}
+ip access-list standard ACL-SNMP
+ permit {{ mgmt_servers.zabbix }}
+ deny   any log
+!
+snmp-server view {{ snmp.view }} iso included
+snmp-server group {{ snmp.group }} v3 priv read {{ snmp.view }} access ACL-SNMP
+snmp-server location SPOKE-{{ inventory_hostname }}
+snmp-server contact noc@xyz.local
+snmp-server ifindex persist
+snmp-server trap-source {{ wan_interface }}
+snmp-server enable traps snmp linkdown linkup
+snmp-server enable traps ospf state-change
+snmp-server enable traps ike tunnel start
+snmp-server enable traps ike tunnel stop
+snmp-server host {{ mgmt_servers.zabbix }} vrf {{ fvrf_name }} version 3 priv {{ snmp_user }}

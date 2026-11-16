@@ -1,0 +1,52 @@
+---
+# Baja de sucursal: primero silenciar Zabbix, luego retirar config, luego borrar el host.
+- name: Baja de spoke
+  hosts: spokes
+  gather_facts: false
+  tasks:
+    - name: Deshabilitar el host en Zabbix (evita tormenta de alertas durante la baja)
+      ansible.builtin.include_role:
+        name: zabbix_host
+        apply: { tags: [zabbix] }
+      vars: { zabbix_state: disabled }
+      tags: [zabbix]
+
+    - name: Retirar configuración del router
+      ansible.builtin.include_role:
+        name: decommission
+
+    - name: Eliminar host de Zabbix
+      ansible.builtin.include_role:
+        name: zabbix_host
+        apply: { tags: [zabbix] }
+      vars: { zabbix_state: absent }
+      tags: [zabbix]
+
+- name: Verificar en los hubs que el sitio desapareció (prueba de aceptación 9)
+  hosts: hubs
+  gather_facts: false
+  tasks:
+    # Coincidencia exacta de la IP: con una búsqueda de texto simple, 192.168.5.13 (R13)
+    # "aparece" dentro de 192.168.5.133 (R3) y la verificación falla aunque el sitio ya no esté.
+    - name: Expresión con las IPs de túnel del sitio dado de baja
+      ansible.builtin.set_fact:
+        _gone_re: >-
+          (^|[^0-9.])({{ (groups['spokes'] | map('extract', hostvars, 'tunnel1_v4') | list
+                         + groups['spokes'] | map('extract', hostvars, 'tunnel2_v4') | list)
+                         | map('regex_escape') | join('|') }})([^0-9]|$)
+
+    - name: Consultar NHRP y OSPF
+      cisco.ios.ios_command:
+        commands:
+          - show ip nhrp
+          - show ip ospf neighbor
+      register: _hub
+      changed_when: false
+
+    - name: El spoke no debe aparecer
+      ansible.builtin.assert:
+        that:
+          - _hub.stdout | join('\n') is not search(_gone_re, multiline=True)
+        fail_msg: "El sitio {{ item }} sigue visible en {{ inventory_hostname }}"
+      loop: "{{ groups['spokes'] }}"      # el inventario se filtra al sitio dado de baja
+      loop_control: { label: "{{ item }}" }

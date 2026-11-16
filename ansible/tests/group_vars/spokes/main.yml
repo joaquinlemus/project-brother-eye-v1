@@ -1,0 +1,3 @@
+---
+# Valor por defecto si la plantilla de equipo (device_templates) no define otra interfaz LAN.
+lan_interfaces: [Ethernet0/1]

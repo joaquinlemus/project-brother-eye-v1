@@ -1,0 +1,46 @@
+---
+- name: Configuración base (hostname, AAA, usuarios, SSH, NTP, syslog)
+  cisco.ios.ios_config:
+    src: base.j2
+    match: line
+  no_log: "{{ not (debug_secrets | default(false)) }}"
+
+# El usuario se envía con la clave en texto plano ('secret cisco123') y IOS la guarda como hash.
+# Como el hash nunca coincide con el texto enviado, solo se crea si el usuario no existe:
+# así no hay 'changed' en cada ejecución. Para cambiar la clave hay que borrar el usuario
+# o enviarlo a mano.
+- name: Leer usuario local de Ansible
+  cisco.ios.ios_command:
+    commands: "show running-config | include ^username {{ ansible_user }} "
+  register: _user
+  changed_when: false
+
+- name: Crear usuario local de Ansible (solo si no existe)
+  cisco.ios.ios_config:
+    lines:
+      - "username {{ ansible_user }} privilege 15 secret {{ ansible_password }}"
+  when: _user.stdout[0] | length == 0
+  no_log: true
+
+# Los routers pueden traer otros 'ntp server' de su configuración mínima (sin VRF, no
+# funcionan). Se deja solo el servidor de gestión por la VRF.
+- name: Leer servidores NTP configurados
+  cisco.ios.ios_command:
+    commands: "show running-config | include ^ntp server"
+  register: _ntp
+  changed_when: false
+
+- name: Quitar servidores NTP que no son el de gestión
+  cisco.ios.ios_config:
+    lines: "{{ _ntp.stdout[0].splitlines() | map('trim') | select('match', '^ntp server')
+               | reject('equalto', 'ntp server vrf ' ~ fvrf_name ~ ' ' ~ mgmt_servers.ntp)
+               | map('regex_replace', '^', 'no ') | list }}"
+  when: >-
+    _ntp.stdout[0].splitlines() | map('trim') | select('match', '^ntp server')
+    | reject('equalto', 'ntp server vrf ' ~ fvrf_name ~ ' ' ~ mgmt_servers.ntp) | list | length > 0
+
+- name: Banner de login
+  cisco.ios.ios_banner:
+    banner: login
+    text: "Heladeria Leche de Cabra - Acceso restringido a personal autorizado. Actividad monitoreada."
+    state: present

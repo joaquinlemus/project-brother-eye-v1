@@ -1,0 +1,3 @@
+---
+zabbix_state: present   # present | disabled | absent
+_zbx_group_name: "{{ zabbix.groups.hubs if 'hubs' in group_names else zabbix.groups.spokes }}"

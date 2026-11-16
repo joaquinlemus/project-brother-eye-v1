@@ -1,0 +1,29 @@
+---
+# Day-0: el router nuevo de EVE-NG no tiene IP ni SSH. Ansible entra por la consola telnet
+# que expone EVE-NG (console_host:console_port), aplica templates/day0.j2 y genera las
+# llaves RSA (no aparecen en running-config, por eso van aparte).
+# Así se cumple "Ansible es la única vía de configuración" desde el primer comando.
+- name: Bootstrap por consola EVE-NG
+  ansible.netcommon.telnet:
+    host: "{{ console_host }}"
+    port: "{{ console_port }}"
+    user: ""
+    password: ""
+    login_prompt: ""
+    prompts: ['[>#]']
+    send_newline: true
+    pause: 1
+    command: >-
+      {{ ['enable', 'configure terminal']
+         + (lookup('ansible.builtin.template', 'day0.j2').splitlines()
+            | map('trim') | reject('match', '^(!|$)') | list)
+         + ['crypto key generate rsa general-keys modulus 2048', 'end', 'write memory'] }}
+  delegate_to: localhost
+  no_log: true
+
+- name: Esperar SSH en la IP underlay
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 22
+    timeout: 120
+  delegate_to: localhost

@@ -1,0 +1,255 @@
+---
+# Alta / deshabilitación / baja del host en Zabbix 7.0 vía API JSON-RPC.
+#   zabbix_state: present | disabled | absent
+#
+# Corre en la EC2 (delegate_to: localhost) y llega a http://172.16.0.20/zabbix por WireGuard.
+# Se usa ansible.builtin.uri en lugar de community.zabbix: no depende de la versión de la
+# colección ni de la conexión httpapi, y cada llamada se ve tal cual en el log del job.
+#
+# Las variables de bloque anulan las de group_vars/all (network_cli, become enable), que
+# también se aplicarían al localhost implícito.
+- name: Zabbix ({{ zabbix_state }}) - {{ inventory_hostname }}
+  delegate_to: localhost
+  vars:
+    ansible_connection: local
+    ansible_become: false
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  module_defaults:
+    ansible.builtin.uri:
+      url: "{{ zabbix.url }}/api_jsonrpc.php"
+      method: POST
+      body_format: json
+      headers:
+        Authorization: "Bearer {{ zabbix_api_token }}"
+      timeout: "{{ zabbix.timeout | default(15) }}"
+      status_code: 200
+  block:
+    - name: Comprobar que hay token de API
+      ansible.builtin.assert:
+        that: zabbix_api_token | default('') | length > 0
+        fail_msg: >-
+          vault_secrets.zabbix_api_token está vacío. Crea el token en Zabbix (Usuarios > API tokens)
+          y guárdalo con 'ansible-vault edit inventories/group_vars/all/vault.yml',
+          o ejecuta con SKIP_TAGS=zabbix.
+        quiet: true
+
+    - name: Buscar el host en Zabbix
+      ansible.builtin.uri:
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: host.get
+          params:
+            filter: { host: ["{{ inventory_hostname }}"] }
+            output: [hostid, host, name, status]
+            selectInterfaces: [interfaceid, ip, port, type, main, details]
+            selectParentTemplates: [templateid, name]
+            selectHostGroups: [groupid, name]
+            selectTags: [tag, value]
+      register: _zbx_get
+      failed_when: _zbx_get.json is not defined or _zbx_get.json.error is defined
+      retries: 3
+      delay: 5
+      until: _zbx_get.json is defined          # reintenta solo fallas de red, no errores de la API
+
+    - name: Estado actual
+      ansible.builtin.set_fact:
+        _zbx_host: "{{ _zbx_get.json.result | first | default({}) }}"
+
+    # ------------------------------------------------------------------ baja
+    - name: Deshabilitar host (no genera alertas durante la baja)
+      ansible.builtin.uri:
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: host.update
+          params: { hostid: "{{ _zbx_host.hostid }}", status: 1 }
+      register: _zbx_r
+      failed_when: _zbx_r.json.error is defined
+      changed_when: true
+      when:
+        - zabbix_state == 'disabled'
+        - _zbx_host.hostid is defined
+        - _zbx_host.status | string == '0'
+
+    - name: Eliminar host (el historial de métricas se pierde; la auditoría queda en el portal)
+      ansible.builtin.uri:
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: host.delete
+          params: ["{{ _zbx_host.hostid }}"]
+      register: _zbx_r
+      failed_when: _zbx_r.json.error is defined
+      changed_when: true
+      when:
+        - zabbix_state == 'absent'
+        - _zbx_host.hostid is defined
+
+    # ------------------------------------------------------------------ alta
+    - name: Alta o actualización
+      when: zabbix_state == 'present'
+      block:
+        - name: Buscar grupo y plantillas
+          ansible.builtin.uri:
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: "{{ item.method }}"
+              params: "{{ item.params }}"
+          loop:
+            - method: hostgroup.get
+              params: { filter: { name: ["{{ _zbx_group_name }}"] }, output: [groupid, name] }
+            - method: template.get
+              params: { filter: { host: "{{ zabbix.templates }}" }, output: [templateid] }
+          loop_control: { label: "{{ item.method }}" }
+          register: _zbx_lookup
+          failed_when: _zbx_lookup.json.error is defined
+
+        - name: Crear el grupo si no existe
+          ansible.builtin.uri:
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: hostgroup.create
+              params: { name: "{{ _zbx_group_name }}" }
+          register: _zbx_newgrp
+          # Un router a la vez. Si otro ya lo creó, Zabbix responde "already exists" o, con MySQL,
+          # "Database error occurred": en ambos casos se relee el grupo en la tarea siguiente.
+          throttle: 1
+          failed_when: false
+          changed_when: _zbx_newgrp.json.result is defined
+          when: _zbx_lookup.results[0].json.result | length == 0
+
+        - name: Releer el grupo si no se pudo crear
+          ansible.builtin.uri:
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: hostgroup.get
+              params: { filter: { name: ["{{ _zbx_group_name }}"] }, output: [groupid] }
+          register: _zbx_regrp
+          failed_when: >-
+            _zbx_regrp.json.error is defined or _zbx_regrp.json.result | length == 0
+          when:
+            - _zbx_newgrp is not skipped
+            - _zbx_newgrp.json.result is not defined
+
+        - name: El grupo debe existir
+          ansible.builtin.assert:
+            that: _zbx_newgrp is skipped or _zbx_newgrp.json.result is defined or _zbx_regrp is succeeded
+            fail_msg: "No se pudo crear el grupo {{ _zbx_group_name }}: {{ _zbx_newgrp.json.error | default(_zbx_newgrp.msg | default('?')) }}"
+            quiet: true
+
+        - name: Las plantillas deben existir en Zabbix
+          ansible.builtin.assert:
+            that: _zbx_lookup.results[1].json.result | length == zabbix.templates | length
+            fail_msg: >-
+              Faltan plantillas en Zabbix. Pedidas: {{ zabbix.templates }};
+              encontradas {{ _zbx_lookup.results[1].json.result | length }}. Revisa el nombre exacto
+              en Recolección de datos > Plantillas.
+            quiet: true
+
+        - name: Construir el host deseado
+          ansible.builtin.set_fact:
+            _zbx_groupid: >-
+              {{ (_zbx_lookup.results[0].json.result | first).groupid
+                 if _zbx_lookup.results[0].json.result | length > 0
+                 else (_zbx_newgrp.json.result.groupids | first) if (_zbx_newgrp.json | default({})).result is defined
+                 else (_zbx_regrp.json.result | first).groupid }}
+            _zbx_templates: "{{ _zbx_lookup.results[1].json.result }}"   # [{templateid: ...}]
+            _zbx_name: "{{ inventory_hostname }} - {{ ('HUB-' ~ hub_cloud_id) if 'hubs' in group_names else site_name }}"
+            _zbx_tags:
+              - { tag: sitio, value: "{{ site_code | default('CENTRAL') }}" }
+              - { tag: rol, value: "{{ 'hub' if 'hubs' in group_names else 'spoke' }}" }
+              - { tag: gestionado_por, value: portal-xyz }
+            _zbx_iface:
+              type: 2                       # SNMP
+              main: 1
+              useip: 1
+              ip: "{{ hostvars[inventory_hostname].ansible_host }}"   # IP underlay (FVRF INET): Zabbix vive en el underlay
+              dns: ""
+              port: "161"
+              details:
+                version: 3
+                bulk: 1
+                max_repetitions: 10
+                securityname: "{{ snmp_user }}"
+                contextname: ""
+                securitylevel: 2            # authPriv
+                authprotocol: 1             # SHA1   (= 'auth sha' en el router)
+                authpassphrase: "{{ snmp_auth_pass }}"
+                privprotocol: 1             # AES128 (= 'priv aes 128' en el router)
+                privpassphrase: "{{ snmp_priv_pass }}"
+          no_log: true
+
+        - name: Crear host
+          ansible.builtin.uri:
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: host.create
+              params:
+                host: "{{ inventory_hostname }}"
+                name: "{{ _zbx_name }}"
+                status: 0
+                groups: [{ groupid: "{{ _zbx_groupid }}" }]
+                templates: "{{ _zbx_templates }}"
+                interfaces: ["{{ _zbx_iface }}"]
+                tags: "{{ _zbx_tags }}"
+          register: _zbx_r
+          failed_when: _zbx_r.json.error is defined
+          changed_when: true
+          no_log: true
+          when: _zbx_host.hostid is not defined
+
+        - name: ¿El host existente difiere de lo deseado?
+          ansible.builtin.set_fact:
+            _zbx_drift: >-
+              {{ _zbx_host.name != _zbx_name
+                 or _zbx_host.status | string != '0'
+                 or (_zbx_host.hostgroups | map(attribute='groupid') | list) != [_zbx_groupid | string]
+                 or (_zbx_host.parentTemplates | map(attribute='templateid') | sort) != (_zbx_templates | map(attribute='templateid') | sort)
+                 or (_zbx_host.tags | sort(attribute='tag')) != (_zbx_tags | sort(attribute='tag'))
+                 or (_zbx_host.interfaces | first).ip != hostvars[inventory_hostname].ansible_host
+                 or (_zbx_host.interfaces | first).details.securityname != snmp_user }}
+          when: _zbx_host.hostid is defined
+
+        - name: Actualizar host existente
+          ansible.builtin.uri:
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: host.update
+              params:
+                hostid: "{{ _zbx_host.hostid }}"
+                name: "{{ _zbx_name }}"
+                status: 0
+                groups: [{ groupid: "{{ _zbx_groupid }}" }]
+                templates: "{{ _zbx_templates }}"
+                tags: "{{ _zbx_tags }}"
+          register: _zbx_r
+          failed_when: _zbx_r.json.error is defined
+          changed_when: true
+          when: _zbx_host.hostid is defined and _zbx_drift | bool
+
+        - name: Actualizar interfaz SNMP existente
+          ansible.builtin.uri:
+            body:
+              jsonrpc: "2.0"
+              id: 1
+              method: hostinterface.update
+              params: "{{ _zbx_iface | combine({'interfaceid': (_zbx_host.interfaces | first).interfaceid}) }}"
+          register: _zbx_r
+          failed_when: _zbx_r.json.error is defined
+          changed_when: true
+          no_log: true
+          when: _zbx_host.hostid is defined and _zbx_drift | bool
+
+  rescue:
+    - name: Error de la API de Zabbix
+      ansible.builtin.fail:
+        msg: >-
+          Falló '{{ ansible_failed_task.name | default('?') }}':
+          {{ (ansible_failed_result.json.error | default({})).data
+             | default(ansible_failed_result.msg | default('ver log')) }}

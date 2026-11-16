@@ -1,0 +1,25 @@
+---
+# La FVRF es responsabilidad del day-0, NUNCA de Ansible: 'vrf forwarding' borra la IP de
+# Ethernet0/0, que es la interfaz por la que Ansible está conectado. Si se aplicara por SSH,
+# el router quedaría sin IP a mitad de la sesión (pasó con R5 el 2026-11-11).
+# Este rol solo verifica que el day-0 la haya dejado bien y, si no, detiene el alta.
+- name: Leer configuración de la interfaz WAN
+  cisco.ios.ios_command:
+    commands:
+      - "show running-config interface {{ wan_interface }}"
+      - "show running-config | section line vty"
+  register: _wan
+  changed_when: false
+
+- name: Verificar FVRF y acceso SSH por la VRF (day-0)
+  ansible.builtin.assert:
+    that:
+      - ("vrf forwarding " ~ fvrf_name) in _wan.stdout[0]
+      - ("ip address " ~ ansible_host ~ " ") in _wan.stdout[0]
+      - "'vrf-also' in _wan.stdout[1]"
+    fail_msg: >-
+      {{ inventory_hostname }}: el day-0 está incompleto. {{ wan_interface }} debe estar en
+      'vrf forwarding {{ fvrf_name }}' con la IP {{ ansible_host }}, y las vty con
+      'access-class MGMT in vrf-also'. Corríjalo por consola (claude/day0-router.md);
+      Ansible no lo cambia por SSH porque cortaría su propia conexión.
+    quiet: true

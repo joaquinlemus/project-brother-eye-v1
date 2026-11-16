@@ -1,0 +1,54 @@
+---
+# Pruebas de aceptación 1-3 automatizadas. Fallan el job si el overlay no converge.
+- name: Esperar 2 SA IKEv2 (una por hub)
+  cisco.ios.ios_command:
+    commands: show crypto ikev2 sa
+  register: _ikev2
+  until: (_ikev2.stdout[0] | regex_findall('READY')) | length >= 2
+  retries: 12
+  delay: 5
+  changed_when: false
+
+- name: Esperar registro NHRP en ambas nubes
+  cisco.ios.ios_command:
+    commands: show dmvpn
+  register: _dmvpn
+  until: (_dmvpn.stdout[0] | regex_findall('\\sUP\\s')) | length >= 2
+  retries: 12
+  delay: 5
+  changed_when: false
+
+- name: Esperar 2 adyacencias OSPFv2 FULL
+  cisco.ios.ios_command:
+    commands: show ip ospf neighbor
+  register: _ospf
+  until: (_ospf.stdout[0] | regex_findall('FULL')) | length >= 2
+  retries: 12
+  delay: 5
+  changed_when: false
+  when: routing_protocol == 'ospf'
+
+- name: Esperar 2 adyacencias OSPFv3 FULL
+  cisco.ios.ios_command:
+    commands: show ospfv3 neighbor
+  register: _ospf6
+  until: (_ospf6.stdout[0] | regex_findall('FULL')) | length >= 2
+  retries: 12
+  delay: 5
+  changed_when: false
+  when: routing_protocol == 'ospf'
+
+- name: Ping a la LAN de otro sitio con DF y 1400 bytes (prueba MTU)
+  cisco.ios.ios_command:
+    commands: "ping {{ verify_peer_lan_ip }} source {{ lan_interfaces[0] }} size 1400 df-bit repeat 5"
+  register: _mtu
+  failed_when: "'Success rate is 0' in _mtu.stdout[0]"
+  changed_when: false
+  when: verify_peer_lan_ip is defined
+
+- name: Publicar resumen de verificación
+  ansible.builtin.set_stats:
+    data:
+      verify:
+        ikev2_sa: "{{ _ikev2.stdout[0] | regex_findall('READY') | length }}"
+        ospf_full: "{{ (_ospf.stdout[0] | default('')) | regex_findall('FULL') | length }}"

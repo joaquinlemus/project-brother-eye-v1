@@ -1,0 +1,38 @@
+---
+# Inventario estático para pruebas de render (sin red ni secretos reales).
+# R1, R2 y R3 usan los valores reales del laboratorio: su salida se compara contra
+# tests/reference/*.cfg (configuración probada). R7 es un sitio nuevo de ejemplo.
+all:
+  children:
+    hubs:
+      hosts:
+        R1: { ansible_host: 172.16.0.1, loopback0: 10.254.0.1, hub_cloud_id: 1 }
+        R2: { ansible_host: 172.16.0.2, loopback0: 10.254.0.2, hub_cloud_id: 2 }
+    spokes:
+      hosts:
+        R3:
+          ansible_host: 172.16.0.3
+          site_id: 3
+          site_code: MAZ-03
+          site_name: Mazate
+          loopback0: 10.254.0.3
+          lan_interfaces: [Ethernet0/1]
+          lan_v4: 10.31.0.0/24
+          lan_v6: "2001:1228:3::/64"
+          tunnel1_v4: 192.168.5.3
+          tunnel2_v4: 192.168.5.133
+          tunnel1_v6: "fd00:5::3"
+          tunnel2_v6: "fd00:5:1::3"
+        R7:
+          ansible_host: 172.16.0.7
+          site_id: 7
+          site_code: ANT-07
+          site_name: Antigua Centro
+          loopback0: 10.254.0.7
+          lan_interfaces: [Ethernet0/1]
+          lan_v4: 10.35.0.0/24
+          lan_v6: "2001:1228:7::/64"
+          tunnel1_v4: 192.168.5.7
+          tunnel2_v4: 192.168.5.137
+          tunnel1_v6: "fd00:5::7"
+          tunnel2_v6: "fd00:5:1::7"

@@ -1,0 +1,64 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [lab, prod]
+        default: lab
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ inputs.environment || 'lab' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [frontend, backend, worker, runner]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build y push (tag = commit)
+        run: |
+          IMAGE=${{ steps.ecr.outputs.registry }}/xyz-${{ matrix.image }}:${{ github.sha }}
+          docker build -f docker/${{ matrix.image }}.Dockerfile -t "$IMAGE" .
+          docker push "$IMAGE"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'lab' }}   # prod exige aprobación manual
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Terraform apply (infra + nuevas task definitions)
+        working-directory: infrastructure/terraform/envs/${{ inputs.environment || 'lab' }}
+        run: |
+          terraform init -input=false
+          terraform apply -input=false -auto-approve -var "image_tag=${{ github.sha }}"
+      - name: Migraciones (tarea ECS de un solo uso)
+        run: ./scripts/run-migrations.sh ${{ inputs.environment || 'lab' }} ${{ github.sha }}
+      - name: Esperar estabilidad de los servicios
+        run: |
+          aws ecs wait services-stable --cluster xyz-${{ inputs.environment || 'lab' }} \
+            --services frontend api worker
+      - name: Smoke tests
+        run: ./scripts/smoke.sh "${{ vars.PORTAL_URL }}"

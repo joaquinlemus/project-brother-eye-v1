@@ -1,0 +1,7 @@
+---
+# Solo verificación (pruebas de aceptación 1-3 y 6). No cambia configuración.
+- name: Verificar sitio
+  hosts: spokes
+  gather_facts: false
+  roles:
+    - verify

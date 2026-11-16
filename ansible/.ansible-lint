@@ -1,0 +1,9 @@
+---
+profile: production
+exclude_paths:
+  - collections/
+  - tests/out/
+  - tests/golden/
+skip_list:
+  # Registros temporales con prefijo "_" dentro de roles: convención del proyecto
+  - var-naming[no-role-prefix]

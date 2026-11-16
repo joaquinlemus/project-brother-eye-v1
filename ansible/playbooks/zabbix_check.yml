@@ -1,0 +1,42 @@
+---
+# Prueba de la integración con Zabbix (no toca routers ni crea nada).
+#   ansible-playbook playbooks/zabbix_check.yml
+- name: Verificar API de Zabbix desde la EC2
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_connection: local
+    ansible_become: false
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    api: "{{ zabbix.url }}/api_jsonrpc.php"
+  tasks:
+    - name: Versión de la API (sin autenticación)
+      ansible.builtin.uri:
+        url: "{{ api }}"
+        method: POST
+        body_format: json
+        body: { jsonrpc: "2.0", id: 1, method: apiinfo.version, params: {} }
+      register: _ver
+
+    - name: Token válido, grupos y plantillas
+      ansible.builtin.uri:
+        url: "{{ api }}"
+        method: POST
+        body_format: json
+        headers: { Authorization: "Bearer {{ zabbix_api_token }}" }
+        body: { jsonrpc: "2.0", id: 1, method: "{{ item.m }}", params: "{{ item.p }}" }
+      loop:
+        - { m: hostgroup.get, p: { filter: { name: "{{ zabbix.groups.values() | list }}" }, output: [name] } }
+        - { m: template.get, p: { filter: { host: "{{ zabbix.templates }}" }, output: [host] } }
+        - { m: host.get, p: { output: [host, name, status], selectTags: [tag, value] } }
+      loop_control: { label: "{{ item.m }}" }
+      register: _q
+      failed_when: _q.json.error is defined
+
+    - name: Resumen
+      ansible.builtin.debug:
+        msg:
+          - "Zabbix API {{ _ver.json.result }}"
+          - "Grupos encontrados: {{ _q.results[0].json.result | map(attribute='name') | list }} (se crean solos si faltan)"
+          - "Plantillas encontradas: {{ _q.results[1].json.result | map(attribute='host') | list }} de {{ zabbix.templates }}"
+          - "Hosts: {{ _q.results[2].json.result | map(attribute='host') | list }}"

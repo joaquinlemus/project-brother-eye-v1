@@ -1,0 +1,11 @@
+---
+# Registra (o actualiza) en Zabbix routers que ya existen, sin conectarse a ellos.
+# Para hubs y para los spokes configurados a mano (R3, R4):
+#   ansible-playbook -i inventories/lab.yml -i inventories/site_R3.yml -i inventories/site_R4.yml \
+#       playbooks/zabbix_register.yml
+# Con -e zabbix_state=absent los elimina.
+- name: Registrar routers existentes en Zabbix
+  hosts: hubs:spokes
+  gather_facts: false
+  roles:
+    - zabbix_host

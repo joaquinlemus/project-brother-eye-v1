@@ -1,0 +1,26 @@
+{# IKEv2 + IPsec en modo transporte para DMVPN. Nombres iguales a los de R1 (crypto_names).
+   La PSK viene de Secrets Manager y debe ser la misma que tienen los hubs. #}
+crypto ikev2 proposal {{ crypto_names.proposal }}
+ encryption {{ ikev2.proposal.encryption }}
+ integrity {{ ikev2.proposal.integrity }}
+ group {{ ikev2.proposal.group }}
+!
+crypto ikev2 policy {{ crypto_names.policy }}
+ match fvrf {{ fvrf_name }}
+ proposal {{ crypto_names.proposal }}
+!
+crypto ikev2 profile {{ crypto_names.ikev2_profile }}
+ match fvrf {{ fvrf_name }}
+ match identity remote address 0.0.0.0
+ authentication remote pre-share
+ authentication local pre-share
+ keyring local {{ crypto_names.keyring }}
+!
+crypto ikev2 dpd {{ ikev2.dpd.interval }} {{ ikev2.dpd.retries }} periodic
+!
+crypto ipsec transform-set {{ crypto_names.transform_set }} {{ ikev2.transform_set }}
+ mode transport
+!
+crypto ipsec profile {{ crypto_names.ipsec_profile }}
+ set transform-set {{ crypto_names.transform_set }}
+ set ikev2-profile {{ crypto_names.ikev2_profile }}

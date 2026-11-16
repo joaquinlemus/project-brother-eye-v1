@@ -1,0 +1,108 @@
+---
+# ---------------- Parámetros FIJOS del diseño (iguales en todos los sitios) -------------
+ansible_connection: ansible.netcommon.network_cli
+ansible_network_os: cisco.ios.ios
+ansible_become: true
+ansible_become_method: enable
+
+team_birthday:          # cumpleaños usado por la regla de direccionamiento
+  month: 12             # MM
+  day: 28               # D
+mmdd: "{{ '%d%02d' | format(team_birthday.month, team_birthday.day) }}"   # 1228
+
+fvrf_name: INET
+wan_interface: Ethernet0/0
+domain_name: lab.local
+underlay_mask: 255.255.255.0
+timezone: { name: CST, offset: -6 }
+
+# Ubuntu del lab (172.16.0.20): Zabbix + punto de entrada. La EC2 llega a los routers
+# a través de la VPN WireGuard (10.99.0.0/24) y el Ubuntu; los routers ven esta IP como origen.
+mgmt_servers:
+  jump_host: 172.16.0.20
+  zabbix: 172.16.0.20
+  ntp: 172.16.0.20
+  syslog: 172.16.0.20
+
+routing_protocol: ospf          # ospf | bgp (plantilla alternativa)
+
+# ---- Valores tomados de la configuración probada de R1, R2, R3 y R4 ----
+# OSPFv2 + OSPFv3 (sintaxis 'ospfv3'), red broadcast en los túneles: el hub es el DR
+# (prioridad 255) y los spokes nunca participan en la elección (prioridad 0).
+ospf:
+  process_id: 1
+  area: 0
+  network_type: broadcast
+  hello: 5
+  dead: 15
+  hub_priority: 255
+  spoke_priority: 0
+
+tunnel_mtu: 1400
+tunnel_mss_v4: 1360
+nhrp_auth_enabled: false        # los routers del lab no usan 'ip nhrp authentication'
+
+crypto_names:
+  proposal: PROP-DMVPN
+  policy: POL-DMVPN
+  keyring: KR-DMVPN
+  ikev2_profile: PROF-DMVPN
+  transform_set: TS-DMVPN
+  ipsec_profile: PROF-IPSEC
+
+# Nubes DMVPN (una por hub). Router s:
+#   Tunnel0: 192.168.5.s/25         y FD00:5::s/64     (hacia R1)
+#   Tunnel1: 192.168.5.(130+s)/25   y FD00:5:1::s/64   (hacia R2)
+#   link-local FE80::s en ambos túneles
+# tunnel key y timers OSPF deben coincidir con el hub; el costo define el hub preferido.
+dmvpn_clouds:
+  - id: 1
+    ifname: Tunnel0
+    key: 1
+    nhrp_network_id: 1
+    ospf_cost: 10                     # nube del Hub 1 preferida
+    v4_mask: 255.255.255.128          # 192.168.5.0/25
+    hub: { name: R1, ifname: Tunnel0, nbma: 172.16.0.1, v4: 192.168.5.1, v6: "FD00:5::1", ll: "FE80::1" }
+  - id: 2
+    ifname: Tunnel1
+    key: 2
+    nhrp_network_id: 2
+    ospf_cost: 100
+    v4_mask: 255.255.255.128          # 192.168.5.128/25
+    hub: { name: R2, ifname: Tunnel1, nbma: 172.16.0.2, v4: 192.168.5.132, v6: "FD00:5:1::2", ll: "FE80::2" }
+
+ikev2:
+  proposal: { encryption: aes-cbc-256, integrity: sha256, group: 14 }
+  transform_set: "esp-aes 256 esp-sha256-hmac"
+  dpd: { interval: 10, retries: 3 }   # global: 'crypto ikev2 dpd 10 3 periodic'
+
+snmp:
+  group: ZBX-GRP
+  view: ZBX-VIEW
+  auth: sha
+  priv: aes 128
+
+# Zabbix 7.0 LTS en el Ubuntu del lab. La EC2 llama a la API por WireGuard.
+zabbix:
+  url: "http://{{ mgmt_servers.zabbix }}/zabbix"     # API: <url>/api_jsonrpc.php
+  timeout: 15
+  groups: { hubs: Hubs, spokes: Sucursales }
+  templates: ["Cisco IOS by SNMP"]                   # nombre técnico exacto de la plantilla
+
+ansible_network_cli_ssh_type: paramiko   # no requiere ansible-pylibssh
+
+# ---------------- Secretos: se resuelven en tiempo de ejecución, nunca en Git ----------
+# vault: archivo cifrado group_vars/all/vault.yml (laboratorio)
+# aws:   AWS Secrets Manager 'xyz/network/credentials' (requiere rol IAM en la EC2)
+secrets_source: vault
+_sm: "{{ vault_secrets if secrets_source == 'vault'
+         else (lookup('amazon.aws.aws_secret', 'xyz/network/credentials', on_missing='error') | from_json) }}"
+ansible_user: "{{ _sm.admin_user }}"
+ansible_password: "{{ _sm.admin_password }}"
+ansible_become_password: "{{ _sm.enable_secret }}"
+ikev2_psk: "{{ _sm.ikev2_psk }}"
+nhrp_auth: "{{ _sm.nhrp_auth }}"                      # máx. 8 caracteres
+snmp_user: "{{ _sm.snmp_user }}"
+snmp_auth_pass: "{{ _sm.snmp_auth }}"
+snmp_priv_pass: "{{ _sm.snmp_priv }}"
+zabbix_api_token: "{{ _sm.zabbix_api_token }}"

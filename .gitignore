@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Ansible
+ansible/collections/ansible_collections/
+ansible/tests/out/
+*.retry
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+
+# Secretos: nunca en Git
+.env
+.env.*
+*.pem
+*.key
+wg0.conf
+
+# Ansible: secretos y sitios generados por el portal
+ansible/inventories/group_vars/all/vault.yml
+ansible/inventories/site_*.yml
+.vault_pass

@@ -1,0 +1,48 @@
+{# Hub, igual que R1/R2 probados. ios_config compara línea por línea: sobre los hubs
+   actuales no debería cambiar nada. No contiene nada por sitio. #}
+{% set c = dmvpn_clouds | selectattr('id', 'equalto', hub_cloud_id) | first %}
+interface Loopback0
+ ip address {{ loopback0 }} 255.255.255.255
+ ip ospf {{ ospf.process_id }} area {{ ospf.area }}
+!
+interface {{ c.hub.ifname }}
+ ip address {{ c.hub.v4 }} {{ c.v4_mask }}
+ no ip redirects
+ ip mtu {{ tunnel_mtu }}
+{% if nhrp_auth_enabled %}
+ ip nhrp authentication {{ nhrp_auth }}
+{% endif %}
+ ip nhrp network-id {{ c.nhrp_network_id }}
+ ip nhrp redirect
+ ip tcp adjust-mss {{ tunnel_mss_v4 }}
+ ip ospf network {{ ospf.network_type }}
+ ip ospf dead-interval {{ ospf.dead }}
+ ip ospf hello-interval {{ ospf.hello }}
+ ip ospf priority {{ ospf.hub_priority }}
+ ip ospf {{ ospf.process_id }} area {{ ospf.area }}
+ ipv6 address {{ c.hub.ll }} link-local
+ ipv6 address {{ c.hub.v6 }}/64
+{% if nhrp_auth_enabled %}
+ ipv6 nhrp authentication {{ nhrp_auth }}
+{% endif %}
+ ipv6 nhrp network-id {{ c.nhrp_network_id }}
+ ipv6 nhrp redirect
+ ospfv3 network {{ ospf.network_type }}
+ ospfv3 hello-interval {{ ospf.hello }}
+ ospfv3 dead-interval {{ ospf.dead }}
+ ospfv3 priority {{ ospf.hub_priority }}
+ ospfv3 {{ ospf.process_id }} ipv6 area {{ ospf.area }}
+ tunnel source {{ wan_interface }}
+ tunnel mode gre multipoint
+ tunnel key {{ c.key }}
+ tunnel vrf {{ fvrf_name }}
+ tunnel protection ipsec profile {{ crypto_names.ipsec_profile }}
+!
+router ospfv3 {{ ospf.process_id }}
+ router-id {{ loopback0 }}
+ !
+ address-family ipv6 unicast
+ exit-address-family
+!
+router ospf {{ ospf.process_id }}
+ router-id {{ loopback0 }}

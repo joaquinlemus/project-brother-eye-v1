@@ -1,0 +1,40 @@
+[project]
+name = "portal-heladeria-api"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.8",
+  "psycopg[binary,pool]>=3.2",
+  "pyjwt>=2.9",
+  "argon2-cffi>=23.1",
+  "pyotp>=2.9",
+  "segno>=1.6",
+  "cryptography>=43",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "S", "UP"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+# SQL armado solo con fragmentos constantes; los valores siempre van como parámetros
+"app/infrastructure/repos.py" = ["S608"]
+"app/api/deps.py" = ["S608"]
+"tests/*" = ["S603", "S607", "S106"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Patrón idiomático de FastAPI para dependencias
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query", "app.api.deps.require"]

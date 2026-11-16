@@ -1,0 +1,20 @@
+---
+# La PSK puede verse cifrada en running-config (tipo 6/7), así que ios_config podría verla
+# siempre distinta y reportar changed=1. Solución: crear el keyring solo si falta.
+# Rotar la PSK es un playbook aparte (playbooks/rotate_psk.yml), no parte del alta.
+- name: Leer keyring IKEv2 actual
+  cisco.ios.ios_command:
+    commands: show running-config | section crypto ikev2 keyring
+  register: _keyring
+  changed_when: false
+
+- name: Crear keyring IKEv2 (solo si no existe)
+  cisco.ios.ios_config:
+    src: keyring.j2
+  when: crypto_names.keyring not in _keyring.stdout[0]
+  no_log: true
+
+- name: Propuesta, política, perfil IKEv2 y perfil IPsec
+  cisco.ios.ios_config:
+    src: ikev2.j2
+    match: line

@@ -1,0 +1,19 @@
+---
+- name: Vista, grupo, ACL y traps SNMPv3
+  cisco.ios.ios_config:
+    src: snmpv3.j2
+    match: line
+
+# Los usuarios SNMPv3 no se guardan en running-config: se consulta 'show snmp user'.
+- name: Leer usuarios SNMPv3
+  cisco.ios.ios_command:
+    commands: show snmp user
+  register: _snmp_users
+  changed_when: false
+
+- name: Crear usuario SNMPv3 (solo si no existe)
+  cisco.ios.ios_config:
+    lines:
+      - "snmp-server user {{ snmp_user }} {{ snmp.group }} v3 auth {{ snmp.auth }} {{ snmp_auth_pass }} priv {{ snmp.priv }} {{ snmp_priv_pass }}"
+  when: "('User name: ' ~ snmp_user) not in _snmp_users.stdout[0]"
+  no_log: true
